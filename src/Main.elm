@@ -1,12 +1,5 @@
 module Main exposing (main)
 
--- Press buttons to increment and decrement a counter.
---
--- Read how it works:
---   https://guide.elm-lang.org/architecture/buttons.html
---
-
-
 import Browser
 import Canvas exposing (..)
 import Canvas.Settings exposing (..)
@@ -19,7 +12,8 @@ import Array
 import Maybe
 import Http
 import Debug
-import Json.Decode exposing (Decoder, map3, field, int, array, index)
+import Json.Decode as Decode
+import Browser.Events
 
 -- MAIN
 
@@ -56,23 +50,56 @@ type alias TileMap =
   , tiles : Array.Array Int
   }
 
-mapDecoder : Decoder TileMap
+mapDecoder : Decode.Decoder TileMap
 mapDecoder =
-  field "layers"
-    (index 0
-      (map3 TileMap
-        (field "width" int)
-        (field "height" int)
-        (field "data" (array int))))
+  Decode.field "layers"
+    (Decode.index 0
+      (Decode.map3 TileMap
+        (Decode.field "width" Decode.int)
+        (Decode.field "height" Decode.int)
+        (Decode.field "data" (Decode.array Decode.int))))
 
+
+type Key
+  = Left
+  | Right
+  | Up
+  | Down
+  | Other
+
+keyDecoder : Decode.Decoder Key
+keyDecoder =
+  Decode.map toDirection (Decode.field "key" Decode.string)
+
+toDirection : String -> Key
+toDirection string =
+  case string of
+    "ArrowLeft" -> Left
+    "ArrowRight" -> Right
+    "ArrowUp" -> Up
+    "ArrowDown" -> Down
+    _ -> Other
+
+
+type alias Point =
+  { x : Int
+  , y : Int
+  }
 
 type alias Model =
   { tiles : Maybe TileSet
   , map : Maybe TileMap
   , status : String
+  , offset : Point
+  , keysDown : List Key
   }
 
-
+type Msg
+  = TilesLoaded Int Int (Maybe Texture)
+  | MapLoaded (Result Http.Error TileMap)
+  | KeyDown Key
+  | KeyUp Key
+  | Tic
 
 init : () -> (Model, Cmd Msg)
 init _ =
@@ -93,6 +120,8 @@ init _ =
                             4, 4, 4, 4, 4, 4, 4, 4, 4, 4]
                 } -}
    , status = "Loading..."
+   , offset = { x = 50, y = 70 }
+   , keysDown = []
    }
    , Http.get
     { url = "/assets/tilemap.tmj"
@@ -100,15 +129,15 @@ init _ =
     })
 
 
-subscriptions : Model -> Sub msg
-subscriptions _ = Sub.none
+subscriptions : Model -> Sub Msg
+subscriptions _ =
+  Sub.batch
+    [ Browser.Events.onKeyDown (Decode.map KeyDown keyDecoder)
+    , Browser.Events.onKeyUp (Decode.map KeyUp keyDecoder) ]
 
 -- UPDATE
 
 
-type Msg
-  = TilesLoaded Int Int (Maybe Texture)
-  | MapLoaded (Result Http.Error TileMap)
 
 
 update : Msg -> Model -> (Model, Cmd msg)
@@ -130,6 +159,17 @@ update msg model =
           Err err ->
             ({ model | status = Debug.toString err }, Cmd.none)
 
+    KeyDown key ->
+      ({ model | keysDown = key :: (remove model.keysDown key) }, Cmd.none)
+
+    KeyUp key ->
+      ({ model | keysDown = (remove model.keysDown key) }, Cmd.none)
+
+    Tic ->
+      (model, Cmd.none)
+
+
+remove list val = List.filter (\v -> v /= val) list
 
 -- VIEW
 
@@ -137,15 +177,15 @@ view : Model -> Html Msg
 view model =
   div []
     [ gameView model
-    , p [ ]
-        [ Html.text model.status ]
+    , p [ ] [ Html.text model.status ]
+    , p [ ] [ Html.text (Debug.toString model.keysDown) ]
     ]
 gameView : Model -> Html Msg
 gameView model =
     let
-        scale = 3
-        width = 30
-        height = 20
+        scale = 5
+        width = 15
+        height = 10
         tileWidth = 16
         tileHeight = 16
         gameWidth = width * tileWidth
@@ -185,14 +225,14 @@ renderTiles model =
                 x = modBy tileMap.width mapIndex
                 y = mapIndex // tileMap.width
               in
-                Just (tile tileSet x y tileIndex)
+                Just (tile tileSet model.offset x y tileIndex)
       in
         List.indexedMap mapTile (Array.toList tileMap.tiles)
         |> List.filterMap identity
 
     _ -> []
 
-tile tileSet x y ii =
+tile tileSet offset x y ii =
   let
     i = ii - 1
     tileRect =
@@ -202,7 +242,7 @@ tile tileSet x y ii =
         , y = toFloat (tileSet.tileWidth * (i // tileSet.tilesPerRow))
         }
     tileTexture = sprite tileRect tileSet.texture
-    position = (toFloat (x * tileSet.tileWidth),
-                toFloat (y * tileSet.tileHeight))
+    position = (toFloat (x * tileSet.tileWidth - offset.x),
+                toFloat (y * tileSet.tileHeight - offset.y))
   in
     texture [] position tileTexture
