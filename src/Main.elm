@@ -14,6 +14,7 @@ import Http
 import Debug
 import Json.Decode as Decode
 import Browser.Events
+import Tuple exposing (second)
 
 -- MAIN
 
@@ -99,7 +100,7 @@ type Msg
   | MapLoaded (Result Http.Error TileMap)
   | KeyDown Key
   | KeyUp Key
-  | Tic
+  | Tic Float
 
 init : () -> (Model, Cmd Msg)
 init _ =
@@ -133,7 +134,8 @@ subscriptions : Model -> Sub Msg
 subscriptions _ =
   Sub.batch
     [ Browser.Events.onKeyDown (Decode.map KeyDown keyDecoder)
-    , Browser.Events.onKeyUp (Decode.map KeyUp keyDecoder) ]
+    , Browser.Events.onKeyUp (Decode.map KeyUp keyDecoder)
+    , Browser.Events.onAnimationFrameDelta Tic ]
 
 -- UPDATE
 
@@ -165,11 +167,32 @@ update msg model =
     KeyUp key ->
       ({ model | keysDown = (remove model.keysDown key) }, Cmd.none)
 
-    Tic ->
-      (model, Cmd.none)
+    Tic time->
+      let
+        offsets = List.map keyOffsets model.keysDown
+        dx = List.map Tuple.first offsets |> List.sum
+        dy = List.map Tuple.second offsets |> List.sum
+      in
+        ({ model |
+             offset = { x = model.offset.x + dx,
+                        y = model.offset.y + dy }}
+        , Cmd.none)
 
 
 remove list val = List.filter (\v -> v /= val) list
+
+keyOffsets key =
+  case key of
+    Up ->
+      (0, -1)
+    Down ->
+      (0, 1)
+    Left ->
+      (-1, 0)
+    Right ->
+      (1, 0)
+    Other ->
+      (0, 0)
 
 -- VIEW
 
@@ -201,7 +224,9 @@ gameView model =
             }
             [ style "border" "1px solid black"
             , style "display" "block" ]
-            (renderTiles model)
+            ( shapes [ fill Color.white ] [ rect ( 0, 0 ) gameWidth gameHeight ]
+              :: (renderTiles model)
+            )
         ]
 
 
