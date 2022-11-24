@@ -26,6 +26,11 @@ main =
 
 -- MODEL
 
+scale = 3
+width = 15
+height = 10
+
+
 type alias TileSet =
   { texture : Texture
   , tileWidth : Int
@@ -121,7 +126,7 @@ init _ =
                             4, 4, 4, 4, 4, 4, 4, 4, 4, 4]
                 } -}
    , status = "Loading..."
-   , offset = { x = 50, y = 70 }
+   , offset = { x = 0, y = 0 }
    , keysDown = []
    }
    , Http.get
@@ -169,13 +174,28 @@ update msg model =
 
     Tic time->
       let
+        (mapWidth, mapHeight) = 
+          case model.map of
+            Just map -> (map.width, map.height)
+            Nothing -> (0, 0)
+        (tileWidth, tileHeight) = 
+          case model.tiles of
+            Just tiles -> (tiles.tileWidth, tiles.tileHeight)
+            Nothing -> (0, 0)
+
+        maxX = tileWidth * (mapWidth - width) 
+        maxY = tileHeight * (mapHeight - height) 
+
         offsets = List.map keyOffsets model.keysDown
         dx = List.map Tuple.first offsets |> List.sum
         dy = List.map Tuple.second offsets |> List.sum
+        
+        newX = model.offset.x + dx
+        newY = model.offset.y + dy
       in
         ({ model |
-             offset = { x = model.offset.x + dx,
-                        y = model.offset.y + dy }}
+             offset = { x = min (max 0 newX) maxX,
+                        y = min (max 0 newY) maxY }}
         , Cmd.none)
 
 
@@ -201,20 +221,20 @@ view model =
   div []
     [ gameView model
     , p [ ] [ Html.text model.status ]
-    , p [ ] [ Html.text (Debug.toString model.keysDown) ]
+    , p [ ] [ Html.text (Debug.toString model.keysDown)
+            , Html.text " "
+            , Html.text (Debug.toString model.offset.x)
+            , Html.text " "
+            , Html.text (Debug.toString model.offset.y) ]
     ]
 gameView : Model -> Html Msg
 gameView model =
     let
-        scale = 5
-        width = 15
-        height = 10
         tileWidth = 16
         tileHeight = 16
         gameWidth = width * tileWidth
         gameHeight = height * tileHeight
         canvasWidth = String.fromInt (gameWidth * scale)
-
     in
       div [ style "width" canvasWidth ]
         [ Canvas.toHtmlWith
