@@ -29,6 +29,9 @@ main =
 scale = 3
 width = 15
 height = 10
+theTileWidth = 16
+theTileHeight = 16
+
 
 
 type alias TileSet =
@@ -227,34 +230,38 @@ view model =
             , Html.text " "
             , Html.text (Debug.toString model.offset.y) ]
     ]
+
 gameView : Model -> Html Msg
 gameView model =
     let
-        tileWidth = 16
-        tileHeight = 16
-        gameWidth = width * tileWidth
-        gameHeight = height * tileHeight
+        gameWidth = width * theTileWidth
+        gameHeight = height * theTileHeight
         canvasWidth = String.fromInt (gameWidth * scale)
     in
       div [ style "width" canvasWidth ]
         [ Canvas.toHtmlWith
             { width = gameWidth
             , height = gameHeight
-            , textures = [ loadFromImageUrl "./assets/tiles.png" (TilesLoaded 16 16) ]
+            , textures = [ loadFromImageUrl "./assets/tiles.png" (TilesLoaded theTileWidth theTileHeight) ]
             }
             [ style "border" "1px solid black"
             , style "display" "block" ]
-            ( shapes [ fill Color.white ] [ rect ( 0, 0 ) gameWidth gameHeight ]
-              :: (renderTiles model)
-            )
+            ([ shapes [ fill Color.white ] [ rect ( 0, 0 ) gameWidth gameHeight ] ]
+             ++ (renderTiles model)
+             ++ renderMan model)
+             
+            
         ]
 
-
-renderSquare : Renderable
-renderSquare =
-  shapes [ fill (Color.rgba 0 0 0 1) ]
-      [ rect (0, 0) 100 50 ]
-
+renderMan : Model -> List Renderable
+renderMan model =
+  let
+    x = (width * theTileWidth) / 2
+    y = (height * theTileHeight) / 2
+    personWidth = 15
+    personHeight = 40
+  in
+    [ shapes [ fill Color.red ] [ rect (x, y) personWidth personHeight ] ]
 
 renderTiles : Model -> List Renderable
 renderTiles model =
