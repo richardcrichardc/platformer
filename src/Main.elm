@@ -29,16 +29,14 @@ main =
 scale = 3
 width = 15
 height = 10
-theTileWidth = 16
-theTileHeight = 16
 
 
 
 type alias TileSet =
   { texture : Texture
+  , tilesPerRow : Int
   , tileWidth : Int
   , tileHeight : Int
-  , tilesPerRow : Int
   }
 
 loadTileSet : Texture -> Int -> Int -> TileSet
@@ -57,17 +55,20 @@ type alias TileMap =
   { width : Int
   , height : Int
   , tiles : Array.Array Int
+  , tileWidth : Int
+  , tileHeight : Int
+  , tileSet : Maybe TileSet
   }
 
 mapDecoder : Decode.Decoder TileMap
 mapDecoder =
-  Decode.field "layers"
-    (Decode.index 0
-      (Decode.map3 TileMap
-        (Decode.field "width" Decode.int)
-        (Decode.field "height" Decode.int)
-        (Decode.field "data" (Decode.array Decode.int))))
-
+    Decode.map6 TileMap
+      (Decode.field "width" Decode.int)
+      (Decode.field "height" Decode.int)
+      (Decode.field "layers" (Decode.index 0 (Decode.field "data" (Decode.array Decode.int))))
+      (Decode.field "tilewidth" Decode.int)
+      (Decode.field "tileheight" Decode.int)
+      (Decode.succeed Nothing)
 
 type Key
   = Left
@@ -95,9 +96,9 @@ type alias Point =
   , y : Int
   }
 
+
 type alias Model =
-  { tiles : Maybe TileSet
-  , map : Maybe TileMap
+  { map : Maybe TileMap
   , status : String
   , offset : Point
   , keysDown : List Key
@@ -112,22 +113,7 @@ type Msg
 
 init : () -> (Model, Cmd Msg)
 init _ =
-  ({ tiles = Nothing
-   , map = Nothing
-            {-Just { width = 10
-               , height = 10
-               , tiles = Array.fromList
-                          [0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                            0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                            0, 0, 0, 0, 0, 4, 4, 4, 4, 4,
-                            0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                            4, 4, 4, 5, 0, 0, 0, 43, 0, 0,
-                            0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                            0, 0, 0, 0, 0, 0, 3, 4, 4, 4,
-                            0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                            0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                            4, 4, 4, 4, 4, 4, 4, 4, 4, 4]
-                } -}
+  ({ map = Nothing
    , status = "Loading..."
    , offset = { x = 0, y = 0 }
    , keysDown = []
@@ -154,12 +140,13 @@ update : Msg -> Model -> (Model, Cmd msg)
 update msg model =
   case msg of
     TilesLoaded tileWidth tileHeight maybeTexture ->
-      case maybeTexture of
-          Just texture ->
+      case (model.map, maybeTexture) of
+          (Just map, Just texture) ->
             ({ model |
-              tiles = Just (loadTileSet texture tileWidth tileHeight) }
+                map = Just { map |
+                             tileSet = Just (loadTileSet texture tileWidth tileHeight) } }
             , Cmd.none)
-          Nothing ->
+          _ ->
             (model, Cmd.none)
 
     MapLoaded result ->
@@ -176,30 +163,25 @@ update msg model =
       ({ model | keysDown = (remove model.keysDown key) }, Cmd.none)
 
     Tic time->
-      let
-        (mapWidth, mapHeight) = 
-          case model.map of
-            Just map -> (map.width, map.height)
-            Nothing -> (0, 0)
-        (tileWidth, tileHeight) = 
-          case model.tiles of
-            Just tiles -> (tiles.tileWidth, tiles.tileHeight)
-            Nothing -> (0, 0)
+      case model.map of
+        Just map ->
+          let
+            maxX = map.tileWidth * (map.width - width)
+            maxY = map.tileHeight * (map.height - height)
 
-        maxX = tileWidth * (mapWidth - width) 
-        maxY = tileHeight * (mapHeight - height) 
+            offsets = List.map keyOffsets model.keysDown
+            dx = List.map Tuple.first offsets |> List.sum
+            dy = List.map Tuple.second offsets |> List.sum
 
-        offsets = List.map keyOffsets model.keysDown
-        dx = List.map Tuple.first offsets |> List.sum
-        dy = List.map Tuple.second offsets |> List.sum
-        
-        newX = model.offset.x + dx
-        newY = model.offset.y + dy
-      in
-        ({ model |
-             offset = { x = min (max 0 newX) maxX,
-                        y = min (max 0 newY) maxY }}
-        , Cmd.none)
+            newX = model.offset.x + dx
+            newY = model.offset.y + dy
+          in
+            ({ model |
+                offset = { x = min (max 0 newX) maxX,
+                            y = min (max 0 newY) maxY }}
+            , Cmd.none)
+        Nothing ->
+          (model, Cmd.none)
 
 
 remove list val = List.filter (\v -> v /= val) list
@@ -233,40 +215,44 @@ view model =
 
 gameView : Model -> Html Msg
 gameView model =
-    let
-        gameWidth = width * theTileWidth
-        gameHeight = height * theTileHeight
-        canvasWidth = String.fromInt (gameWidth * scale)
-    in
-      div [ style "width" canvasWidth ]
-        [ Canvas.toHtmlWith
-            { width = gameWidth
-            , height = gameHeight
-            , textures = [ loadFromImageUrl "./assets/tiles.png" (TilesLoaded theTileWidth theTileHeight) ]
-            }
-            [ style "border" "1px solid black"
-            , style "display" "block" ]
-            ([ shapes [ fill Color.white ] [ rect ( 0, 0 ) gameWidth gameHeight ] ]
-             ++ (renderTiles model)
-             ++ renderMan model)
-             
-            
-        ]
+  case model.map of
+    Nothing ->
+      div [] []
+    Just map ->
+      let
+          gameWidth = width * map.tileWidth
+          gameHeight = height * map.tileHeight
+          canvasWidth = String.fromInt (gameWidth * scale)
+      in
+        div [ style "width" canvasWidth ]
+          [ Canvas.toHtmlWith
+              { width = gameWidth
+              , height = gameHeight
+              , textures = [ loadFromImageUrl "./assets/tiles.png" (TilesLoaded map.tileWidth map.tileHeight) ]
+              }
+              [ style "border" "1px solid black"
+              , style "display" "block" ]
+              ([ shapes [ fill Color.white ] [ rect ( 0, 0 ) (toFloat gameWidth) (toFloat gameHeight) ] ]
+               ++ (renderTiles map model.offset)
+               ++ renderMan map)
 
-renderMan : Model -> List Renderable
-renderMan model =
+
+          ]
+
+renderMan : TileMap -> List Renderable
+renderMan map =
   let
-    x = (width * theTileWidth) / 2
-    y = (height * theTileHeight) / 2
+    x = (width * (toFloat map.tileWidth)) / 2
+    y = (height * (toFloat map.tileHeight)) / 2
     personWidth = 15
     personHeight = 40
   in
     [ shapes [ fill Color.red ] [ rect (x, y) personWidth personHeight ] ]
 
-renderTiles : Model -> List Renderable
-renderTiles model =
-  case (model.tiles, model.map) of
-    (Just tileSet, Just tileMap) ->
+renderTiles : TileMap -> Point -> List Renderable
+renderTiles tileMap offset =
+  case tileMap.tileSet of
+    Just tileSet ->
       let
         mapTile mapIndex tileIndex =
           case tileIndex of
@@ -277,7 +263,7 @@ renderTiles model =
                 x = modBy tileMap.width mapIndex
                 y = mapIndex // tileMap.width
               in
-                Just (tile tileSet model.offset x y tileIndex)
+                Just (tile tileSet offset x y tileIndex)
       in
         List.indexedMap mapTile (Array.toList tileMap.tiles)
         |> List.filterMap identity
